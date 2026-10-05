@@ -1,0 +1,27 @@
+name: Export pinned Chentu offline artifact
+on:
+  push:
+    branches: [codex/spark-offline-export]
+permissions:
+  contents: read
+  packages: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare authenticated OCI archive
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y skopeo
+          printf '%s' "$GHCR_TOKEN" | skopeo login ghcr.io --username "$GHCR_USER" --password-stdin
+          skopeo copy --all --preserve-digests docker://ghcr.io/theapeironlab/gpustack@sha256:c838ac49a031ef795fc32596c4fcdc37d9514d154fa8a13bc3f249921375a07b oci-archive:gpustack-pkce.oci.tar:gpustack
+          skopeo logout ghcr.io
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpustack-pkce-oci
+          path: gpustack-pkce.oci.tar
+          compression-level: 0
+          retention-days: 3
