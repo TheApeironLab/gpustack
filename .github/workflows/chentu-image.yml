@@ -1,6 +1,8 @@
 name: Chentu PKCE image
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/oidc-pkce]
 permissions:
   contents: read
   packages: write
