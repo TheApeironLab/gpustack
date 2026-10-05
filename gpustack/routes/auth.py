@@ -1,6 +1,8 @@
 import base64
 import functools
 import hmac
+import hashlib
+import re
 import json
 import os
 import secrets
@@ -799,6 +801,7 @@ def _coerce_group_claim(raw) -> List[str]:
 
 
 # OIDC login and callback endpoints
+OIDC_PKCE_COOKIE_NAME = "gpustack_oidc_pkce"
 
 
 @oidc_router.get("/oidc/login")
@@ -806,6 +809,8 @@ async def oidc_login(request: Request):
     config: Config = request.app.state.server_config
     authorization_endpoint = config.openid_configuration["authorization_endpoint"]
     state = secrets.token_urlsafe(32)
+    verifier = secrets.token_urlsafe(32)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
     params = urlencode(
         {
             "response_type": "code",
@@ -813,6 +818,8 @@ async def oidc_login(request: Request):
             "redirect_uri": config.oidc_redirect_uri,
             "scope": "openid profile email",
             "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
         }
     )
     authUrl = f'{authorization_endpoint}?{params}'
@@ -824,8 +831,9 @@ async def oidc_login(request: Request):
         httponly=True,
         max_age=600,
         samesite="lax",
-        secure=request.url.scheme == "https",
+        secure=config.oidc_redirect_uri.startswith("https://"),
     )
+    response.set_cookie(key=OIDC_PKCE_COOKIE_NAME, value=verifier, httponly=True, max_age=600, samesite="lax", secure=config.oidc_redirect_uri.startswith("https://"))
     return response
 
 
@@ -845,9 +853,13 @@ async def oidc_callback(request: Request, session: SessionDep):
     ):
         raise UnauthorizedException(message="Invalid OIDC state")
 
+    verifier = request.cookies.get(OIDC_PKCE_COOKIE_NAME, "")
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", verifier):
+        raise UnauthorizedException(message="Missing or invalid OIDC PKCE verifier")
     code = query['code']
     data = {
         "grant_type": "authorization_code",
+        "code_verifier": verifier,
         "code": code,
         "client_id": config.oidc_client_id,
         "client_secret": config.oidc_client_secret,
@@ -926,6 +938,7 @@ async def oidc_callback(request: Request, session: SessionDep):
     )
     response = RedirectResponse(url='/')
     response.delete_cookie(key=OIDC_STATE_COOKIE_NAME)
+    response.delete_cookie(key=OIDC_PKCE_COOKIE_NAME)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=access_token,

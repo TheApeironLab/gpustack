@@ -1,0 +1,2 @@
+FROM gpustack/gpustack:v2.2.3
+COPY gpustack/routes/auth.py /usr/local/lib/python3.11/dist-packages/gpustack/routes/auth.py
